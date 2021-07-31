@@ -1,41 +1,62 @@
 import * as Discord from 'discord.js'
+import {GuildMember} from "discord.js";
 const client = new Discord.Client()
 
 const serverId = getRequiredEnvironmentVariable('DISCORD_SERVER_ID')
-const joinLogChannelId = getRequiredEnvironmentVariable('DISCORD_JOIN_LOG_CHANNEL_ID')
 const adminChannelId = getRequiredEnvironmentVariable('DISCORD_ADMIN_CHANNEL_ID')
 const botAuthToken = getRequiredEnvironmentVariable('DISCORD_BOT_AUTH_TOKEN')
 
 const startTime = new Date();
 let lastJoinTime = startTime
-let consecutiveJoins = 0
 
-function RaidCheck(serverId: string) {
-	const adminChannel = getChannel(serverId, adminChannelId)
+let bufferedJoins: GuildMember[] = []
+
+async function RaidCheck(member: GuildMember) {
+	if (member.guild.id !== serverId) return
+
+	const adminChannel = getChannel(serverId, adminChannelId);
 
 	const currentTime = new Date();
 	const elapsedTime = currentTime.getTime() - lastJoinTime.getTime()
 
-	console.log(`cuurent time = ` + currentTime.getTime())
+	console.log(`current time = ` + currentTime.getTime())
 
 	const timeDiff = elapsedTime / 1000;
 
 	// get seconds
 	const seconds = Math.round(timeDiff);
 	console.log(`elapsed time = ` + seconds + " seconds");
+	bufferedJoins.push(member);
 
 	if (seconds < 30) {
-		consecutiveJoins++
-		console.log(`I saw a consectutive join`)
+		console.log(`I saw a consecutive join`)
 
-		if (consecutiveJoins > 3) {
-			console.log(`I saw more than 3 consecutive joins!!`)
-			adminChannel.send(`RUN FOR COVER - A MASS DM SPAMBOT MIGHT BE JOINING OUR SERVER!`)
-			adminChannel.send(`Can someone monitor the welcome channel and ban these accounts? format is: "ban [WelcomeMessageIDStart] [WelcomeMessageIDEnd]"`)
+		if (bufferedJoins.length > 10) {
+			console.log(`Detected more than 10 consecutive joins, banning them.`)
+
+			const users = bufferedJoins.map((member) => "@" + member.user.username + "#" + member.user.discriminator).join(", ");
+			console.log(`banning: ` + users);
+			try {
+				await adminChannel.send("detected 10+ joins in 30 seconds, would ban: " + users);
+			} catch (e) {
+				console.log("Failed to notify server admins of detected join raid")
+				return
+			}
+
+			// for (const member of bufferedJoins) {
+			// 	console.log(`Banning: ${member.user.username}#${member.user.discriminator} (${member.user.id})`);
+			// 	try {
+			// 		await member.guild.members.ban(member.user.id, {days: 7, reason: "Join raid."})
+			// 	} catch (e) {
+			// 		console.log(`Failed to ban: ${member.user.username}#${member.user.discriminator} (${member.user.id}): ${e.toString()}`);
+			// 	}
+			// }
+
+			bufferedJoins = [];
 		}
 	} else {
-		console.log(`Re-setting join detector` + consecutiveJoins)
-		consecutiveJoins = 0
+		console.log(`Re-setting join detector`)
+		bufferedJoins = [member];
 	}
 
 	lastJoinTime = currentTime
@@ -43,11 +64,11 @@ function RaidCheck(serverId: string) {
 	return
 }
 
-client.on('ready', () => {
+client.on('ready', async () => {
 	// This event will run if the bot starts, and logs in, successfully.
 	if (client.user === null) throw new Error(`Client doesn't have a user.`)
 	console.log(`Bot has started, with ${client.users.cache.size} users, in ${client.channels.cache.size} channels of ${client.guilds.cache.size} servers.`)
-	client.user.setActivity(`watchdog`)
+	await client.user.setActivity(`banning bots`)
 })
 
 client.on('guildCreate', (guild) => {
@@ -55,65 +76,9 @@ client.on('guildCreate', (guild) => {
 	console.log(`New server joined: ${guild.name} (id: ${guild.id}). This server has ${guild.memberCount} members!`)
 })
 
-client.on('guildMemberAdd', (member) => {
+client.on('guildMemberAdd', async (member) => {
 	console.log('Triggered member add')
-
-	RaidCheck(member.guild.id)
-})
-
-client.on("message", async maybeCommand => {
-	try {
-		const commandServer = maybeCommand.guild
-		if (commandServer === null) return
-		if (commandServer.id !== serverId) return
-		console.log(`Noticed message in server ${commandServer.id} channel ${maybeCommand.channel.id}: ${maybeCommand}`)
-		if (maybeCommand.channel.id !== joinLogChannelId) return
-
-		const regex = maybeCommand.content.match(/^ban (\d+?) (\d+?)$/i)
-		if (regex === null) return
-
-		const joinLogChannel = getChannel(commandServer.id, joinLogChannelId)
-		const toBan: Discord.Message[] = []
-		let currentMessageId = BigInt(regex[1]) > BigInt(regex[2]) ? BigInt(regex[1]) : BigInt(regex[2])
-		const lastMessageId = BigInt(regex[1]) < BigInt(regex[2]) ? BigInt(regex[1]) : BigInt(regex[2])
-		console.log(`Banning everyone from message ID ${lastMessageId} to ${currentMessageId}`)
-		let doneCollecting = false;
-		while (!doneCollecting) {
-			const messages = await joinLogChannel.messages.fetch({ limit: 50, before: (currentMessageId + 1n).toString(10) })
-			messages.forEach(message => {
-				const messageId = BigInt(message.id)
-				if (message.type !== 'GUILD_MEMBER_JOIN') return
-				if (messageId < lastMessageId) return (doneCollecting = true)
-				toBan.push(message)
-				currentMessageId = BigInt(message.id)
-			});
-		}
-
-		console.log('The people to ban...!')
-		console.log(toBan.map(message => message.author.username));
-
-		const firstBannedMessage = toBan[toBan.length - 1]
-		const lastBannedMessage = toBan[0]
-		const banTimeRange = Math.abs(lastBannedMessage.createdAt.getTime() - firstBannedMessage.createdAt.getTime())
-		if (banTimeRange > 5 * 60 * 1000) {
-			await maybeCommand.channel.send({ content: `You can only ban over a a 5 minute range, and the two selected messages span a ${banTimeRange / 1000 / 60} minute range.` })
-			return
-		}
-		const confirmationMessage = await maybeCommand.channel.send({ content: `Are you sure? You are going to ban ${toBan.length} users who joined from ${firstBannedMessage.author.username}#${firstBannedMessage.author.discriminator} (\`${firstBannedMessage.createdAt.toUTCString()}\`) ${lastBannedMessage.author.username}#${lastBannedMessage.author.discriminator} to (\`${lastBannedMessage.createdAt.toUTCString()}\`)` })
-		const allReactions = await confirmationMessage.awaitReactions(reaction => ["👍"].includes(reaction.emoji.name), { max: 1, time: 60000, errors: ["time"] })
-		const reaction = allReactions.first();
-		console.log('reaction parsed')
-		console.log(reaction)
-
-		if (!reaction || reaction.emoji.name !== "👍") return
-		for (const userMessage of toBan) {
-			console.log(`Banning: ${userMessage.author.username}#${userMessage.author.discriminator} (${userMessage.author.id})`)
-			await commandServer.members.ban(userMessage.author.id, { days: 7, reason: "Join raid." })
-		}
-	} catch (error: unknown) {
-		await maybeCommand.channel.send({ content: `No 👍 reaction received after 1 minute, ban cancelled (or possibly some other error, Discord doesn't have good error reporting).` })
-		console.error(error)
-	}
+	await RaidCheck(member)
 })
 
 client.login(botAuthToken)
