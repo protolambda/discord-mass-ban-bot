@@ -37,7 +37,7 @@ async function RaidCheck(member: GuildMember) {
 			const users = bufferedJoins.map((member) => "@" + member.user.username + "#" + member.user.discriminator).join(", ");
 			console.log(`banning: ` + users);
 			try {
-				await adminChannel.send(`detected ${bufferedJoins.length} joins in 30 seconds, would ban: ${users}`);
+				await adminChannel.send(`detected ${bufferedJoins.length} joins in 30 seconds, banning: ${users}`);
 			} catch (e) {
 				console.log("Failed to notify server admins of detected join raid")
 				return
