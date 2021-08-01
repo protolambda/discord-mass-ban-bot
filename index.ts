@@ -31,26 +31,26 @@ async function RaidCheck(member: GuildMember) {
 	if (seconds < 30) {
 		console.log(`I saw a consecutive join`)
 
-		if (bufferedJoins.length > 10) {
-			console.log(`Detected more than 10 consecutive joins, banning them.`)
+		if (bufferedJoins.length > 7) {
+			console.log(`Detected ${bufferedJoins.length} consecutive joins, banning them.`)
 
 			const users = bufferedJoins.map((member) => "@" + member.user.username + "#" + member.user.discriminator).join(", ");
 			console.log(`banning: ` + users);
 			try {
-				await adminChannel.send("detected 10+ joins in 30 seconds, would ban: " + users);
+				await adminChannel.send(`detected ${bufferedJoins.length} joins in 30 seconds, would ban: ${users}`);
 			} catch (e) {
 				console.log("Failed to notify server admins of detected join raid")
 				return
 			}
 
-			// for (const member of bufferedJoins) {
-			// 	console.log(`Banning: ${member.user.username}#${member.user.discriminator} (${member.user.id})`);
-			// 	try {
-			// 		await member.guild.members.ban(member.user.id, {days: 7, reason: "Join raid."})
-			// 	} catch (e) {
-			// 		console.log(`Failed to ban: ${member.user.username}#${member.user.discriminator} (${member.user.id}): ${e.toString()}`);
-			// 	}
-			// }
+			for (const member of bufferedJoins) {
+				console.log(`Banning: ${member.user.username}#${member.user.discriminator} (${member.user.id})`);
+				try {
+					await member.guild.members.ban(member.user.id, {days: 7, reason: "Join raid."})
+				} catch (e) {
+					console.log(`Failed to ban: ${member.user.username}#${member.user.discriminator} (${member.user.id}): ${e.toString()}`);
+				}
+			}
 
 			bufferedJoins = [];
 		}
