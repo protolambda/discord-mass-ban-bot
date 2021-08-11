@@ -10,6 +10,7 @@ const startTime = new Date();
 let lastJoinTime = startTime
 
 let bufferedJoins: GuildMember[] = []
+let recentProcessedJoins = 0
 
 async function RaidCheck(member: GuildMember) {
 	if (member.guild.id !== serverId) return
@@ -18,6 +19,8 @@ async function RaidCheck(member: GuildMember) {
 
 	const currentTime = new Date();
 	const elapsedTime = currentTime.getTime() - lastJoinTime.getTime()
+
+	lastJoinTime = currentTime
 
 	console.log(`current time = ` + currentTime.getTime())
 
@@ -31,19 +34,23 @@ async function RaidCheck(member: GuildMember) {
 	if (seconds < 30) {
 		console.log(`I saw a consecutive join`)
 
-		if (bufferedJoins.length > 7) {
-			console.log(`Detected ${bufferedJoins.length} consecutive joins, banning them.`)
+		if (bufferedJoins.length + recentProcessedJoins > 7) {
+			const currentJoins = bufferedJoins;
+			recentProcessedJoins += currentJoins.length;
+			bufferedJoins = [];
 
-			const users = bufferedJoins.map((member) => "@" + member.user.username + "#" + member.user.discriminator).join(", ");
+			console.log(`Detected ${currentJoins.length} join raid, banning them.`)
+
+			const users = currentJoins.map((member) => "@" + member.user.username + "#" + member.user.discriminator).join(", ");
 			console.log(`banning: ` + users);
 			try {
-				await adminChannel.send(`detected ${bufferedJoins.length} joins in 30 seconds, banning: ${users}`);
+				await adminChannel.send(`join raid detected, banning: ${users}`);
 			} catch (e) {
 				console.log("Failed to notify server admins of detected join raid")
 				return
 			}
 
-			for (const member of bufferedJoins) {
+			for (const member of currentJoins) {
 				console.log(`Banning: ${member.user.username}#${member.user.discriminator} (${member.user.id})`);
 				try {
 					await member.guild.members.ban(member.user.id, {days: 7, reason: "Join raid."})
@@ -52,14 +59,12 @@ async function RaidCheck(member: GuildMember) {
 				}
 			}
 
-			bufferedJoins = [];
 		}
 	} else {
 		console.log(`Re-setting join detector`)
 		bufferedJoins = [member];
+		recentProcessedJoins = 0;
 	}
-
-	lastJoinTime = currentTime
 
 	return
 }
